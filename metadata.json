@@ -1,0 +1,6 @@
+{
+  "name": "星特朗127SLT树莓派自动寻星控制台",
+  "description": "基于树莓派和Celestron NexStar协议的星特朗127SLT天文望远镜自动寻星与观测控制台",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
