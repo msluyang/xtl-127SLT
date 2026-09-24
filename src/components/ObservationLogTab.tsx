@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { TelescopeState, ObservationLogEntry } from '../types/telescope';
 import { formatRA, formatDec } from '../services/astronomy';
+import { TrackingPrecisionChart } from './TrackingPrecisionChart';
 import {
   BookOpen,
   Plus,
@@ -166,6 +167,13 @@ export const ObservationLogTab: React.FC<ObservationLogTabProps> = ({ state, nig
           </div>
         </div>
       </div>
+
+      {/* Real-time Tracking Precision and Error Curve (Recharts) */}
+      <TrackingPrecisionChart
+        state={state}
+        nightMode={nightMode}
+        title="观测时段望远镜赤经/赤纬追踪精度与导星稳定性监视"
+      />
 
       {/* Log Cards List */}
       <div className="space-y-4">

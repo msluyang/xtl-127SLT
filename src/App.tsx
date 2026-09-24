@@ -5,6 +5,7 @@ import { Navbar } from './components/Navbar';
 import { InteractiveSkyMap } from './components/InteractiveSkyMap';
 import { CatalogTab } from './components/CatalogTab';
 import { ControlDeckTab } from './components/ControlDeckTab';
+import { TimelapseTab } from './components/TimelapseTab';
 import { SkyRadarView } from './components/SkyRadarView';
 import { AlignmentWizardTab } from './components/AlignmentWizardTab';
 import { RaspberryPiTab } from './components/RaspberryPiTab';
@@ -106,7 +107,26 @@ export default function App() {
           />
         )}
 
-        {/* Tab 3: Sky Radar & Eyepiece FOV View */}
+        {/* Tab 3: Astrophotography Time-lapse & GPIO Shutter Controller */}
+        {activeTab === 'timelapse' && (
+          <TimelapseTab
+            state={telescopeState}
+            nightMode={nightMode}
+            location={location}
+          />
+        )}
+
+        {/* Tab 4: Deep Sky Target Catalog */}
+        {activeTab === 'catalog' && (
+          <CatalogTab
+            state={telescopeState}
+            nightMode={nightMode}
+            location={location}
+            onSelectTarget={handleSelectTarget}
+          />
+        )}
+
+        {/* Tab 5: Sky Radar & Eyepiece FOV View */}
         {activeTab === 'radar' && (
           <SkyRadarView
             state={telescopeState}

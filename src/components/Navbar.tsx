@@ -84,6 +84,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const navItems = [
     { id: 'skymap', label: '交互式星图寻星', icon: '🌌' },
     { id: 'control', label: '赤经赤纬精密控制', icon: '🕹️' },
+    { id: 'timelapse', label: '延时天文摄影', icon: '📸' },
     { id: 'catalog', label: '深空天体库', icon: '🎯' },
     { id: 'radar', label: '半球雷达与目镜视场', icon: '🔭' },
     { id: 'alignment', label: '星空校准向导', icon: '🧭' },

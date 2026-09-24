@@ -177,11 +177,89 @@ class GotoRequest(BaseModel):
     dec: float
     target_name: str = "Target"
 
+class CameraTriggerRequest(BaseModel):
+    exposure_sec: float = 5.0
+    shutter_pin: int = 17
+    focus_pin: int = 27
+    active_low: bool = True
+
+class TimelapseStartRequest(BaseModel):
+    interval_sec: float = 5.0
+    total_frames: int = 100
+    exposure_sec: float = 8.0
+    settling_sec: float = 2.0
+    shutter_pin: int = 17
+    focus_pin: int = 27
+    active_low: bool = True
+
+# --- 树莓派 GPIO 相机控制模块 ---
+class RaspberryPiCameraTrigger:
+    def __init__(self):
+        self.has_gpio = False
+        self.shutter_pin = 17
+        self.focus_pin = 27
+        self.active_low = True
+        self.is_exposing = False
+        self.timelapse_active = False
+        self.current_frame = 0
+        self.total_frames = 0
+        try:
+            import RPi.GPIO as GPIO
+            self.GPIO = GPIO
+            self.GPIO.setmode(GPIO.BCM)
+            self.GPIO.setwarnings(False)
+            self.has_gpio = True
+            print("[OK] 树莓派硬件 GPIO (RPi.GPIO) 库初始化成功")
+        except ImportError:
+            print("[WARN] 未检测到物理 RPi.GPIO，将以硬件仿真/日志模式运行相机快门")
+            self.GPIO = None
+
+    def setup_pins(self, shutter_pin: int = 17, focus_pin: int = 27, active_low: bool = True):
+        self.shutter_pin = shutter_pin
+        self.focus_pin = focus_pin
+        self.active_low = active_low
+        if self.has_gpio and self.GPIO:
+            self.GPIO.setup(self.shutter_pin, self.GPIO.OUT)
+            self.GPIO.setup(self.focus_pin, self.GPIO.OUT)
+            # Default inactive state
+            inactive_val = self.GPIO.HIGH if self.active_low else self.GPIO.LOW
+            self.GPIO.output(self.shutter_pin, inactive_val)
+            self.GPIO.output(self.focus_pin, inactive_val)
+
+    def set_shutter(self, active: bool):
+        self.is_exposing = active
+        if self.has_gpio and self.GPIO:
+            val = (self.GPIO.LOW if self.active_low else self.GPIO.HIGH) if active else (self.GPIO.HIGH if self.active_low else self.GPIO.LOW)
+            self.GPIO.output(self.shutter_pin, val)
+        print(f"[GPIO {self.shutter_pin}] 相机快门: {'⚡ 闭合曝光 (PULSE ON)' if active else '💤 释放关闭 (PULSE OFF)'}")
+
+    def set_focus(self, active: bool):
+        if self.has_gpio and self.GPIO:
+            val = (self.GPIO.LOW if self.active_low else self.GPIO.HIGH) if active else (self.GPIO.HIGH if self.active_low else self.GPIO.LOW)
+            self.GPIO.output(self.focus_pin, val)
+
+    async def single_shot(self, exposure_sec: float = 5.0, shutter_pin: int = 17, focus_pin: int = 27, active_low: bool = True):
+        self.setup_pins(shutter_pin, focus_pin, active_low)
+        # 1. 预唤醒/对焦 200ms
+        self.set_focus(True)
+        await asyncio.sleep(0.2)
+        # 2. 触发快门
+        self.set_shutter(True)
+        await asyncio.sleep(exposure_sec)
+        # 3. 释放快门与对焦
+        self.set_shutter(False)
+        self.set_focus(False)
+        return {"status": "shot_completed", "exposure_sec": exposure_sec}
+
+camera_trigger = RaspberryPiCameraTrigger()
+camera_timelapse_task = None
+
 active_websockets: Set[WebSocket] = set()
 
 @app.on_event("startup")
 async def startup_event():
     driver.connect()
+    camera_trigger.setup_pins(17, 27, True)
     asyncio.create_task(telemetry_loop())
 
 async def telemetry_loop():
@@ -200,6 +278,10 @@ async def telemetry_loop():
                     "model": driver.model_name,
                     "version": driver.version,
                     "trackingMode": driver.tracking_mode,
+                    "cameraExposing": camera_trigger.is_exposing,
+                    "timelapseActive": camera_trigger.timelapse_active,
+                    "currentFrame": camera_trigger.current_frame,
+                    "totalFrames": camera_trigger.total_frames,
                     "timestamp": time.time(),
                     "ping": 8
                 }
@@ -220,8 +302,65 @@ async def get_status():
         "version": driver.version,
         "ra": driver.last_ra,
         "dec": driver.last_dec,
-        "isSlewing": driver.is_slewing
+        "isSlewing": driver.is_slewing,
+        "cameraExposing": camera_trigger.is_exposing,
+        "gpioSupported": camera_trigger.has_gpio
     }
+
+@app.post("/api/camera/trigger")
+async def trigger_camera(req: CameraTriggerRequest):
+    """单张测试拍摄 / 触发树莓派 GPIO"""
+    result = await camera_trigger.single_shot(
+        exposure_sec=req.exposure_sec,
+        shutter_pin=req.shutter_pin,
+        focus_pin=req.focus_pin,
+        active_low=req.active_low
+    )
+    return result
+
+@app.post("/api/timelapse/start")
+async def start_timelapse(req: TimelapseStartRequest):
+    """通过树莓派后台运行全自动延时摄影任务"""
+    global camera_timelapse_task
+    camera_trigger.setup_pins(req.shutter_pin, req.focus_pin, req.active_low)
+    camera_trigger.timelapse_active = True
+    camera_trigger.total_frames = req.total_frames
+    camera_trigger.current_frame = 0
+
+    async def run_loop():
+        for frame in range(1, req.total_frames + 1):
+            if not camera_trigger.timelapse_active:
+                break
+            camera_trigger.current_frame = frame
+            # 望远镜震动沉降
+            if req.settling_sec > 0:
+                await asyncio.sleep(req.settling_sec)
+            # 曝光开始
+            await camera_trigger.single_shot(
+                exposure_sec=req.exposure_sec,
+                shutter_pin=req.shutter_pin,
+                focus_pin=req.focus_pin,
+                active_low=req.active_low
+            )
+            # 拍摄间隔
+            if frame < req.total_frames:
+                await asyncio.sleep(req.interval_sec)
+        camera_trigger.timelapse_active = False
+
+    if camera_timelapse_task and not camera_timelapse_task.done():
+        camera_timelapse_task.cancel()
+    camera_timelapse_task = asyncio.create_task(run_loop())
+    return {"status": "timelapse_started", "total_frames": req.total_frames}
+
+@app.post("/api/timelapse/stop")
+async def stop_timelapse():
+    global camera_timelapse_task
+    camera_trigger.timelapse_active = False
+    camera_trigger.set_shutter(False)
+    camera_trigger.set_focus(False)
+    if camera_timelapse_task and not camera_timelapse_task.done():
+        camera_timelapse_task.cancel()
+    return {"status": "timelapse_stopped"}
 
 @app.post("/api/goto")
 async def goto_target(req: GotoRequest):
@@ -370,6 +509,20 @@ export const HARDWARE_WIRING_GUIDE = {
         '1. 运行 `sudo raspi-config` -> Advanced Options -> Network Config -> AP Mode，或使用 `nmcli` 创建热点：\n' +
         '   `sudo nmcli dev wifi hotspot ifname wlan0 ssid Celestron-127SLT password "astronomy888"`\n' +
         '2. 手机或平板直接连接该 Wi-Fi 热点，浏览器打开控制台输入 `192.168.4.1:8000` 即可在野外荒原畅享全自动寻星！',
+    },
+    {
+      heading: '4. 树莓派 GPIO 控制相机快门线硬件接线 (延时摄影)',
+      content:
+        '通过树莓派的 40-Pin GPIO 控制单反/微单相机的 2.5mm/3.5mm 快门线（如佳能 C1/C3、索尼 S2、尼康 DC2）：\n' +
+        '• 推荐使用 PC817 光电耦合器模块（电气隔离，杜绝烧毁相机主板与树莓派）：\n' +
+        '  - 树莓派 BCM GPIO 17 (物理 Pin 11) -> 限流电阻 330Ω -> PC817 光耦输入端 IN1 (快门通道)\n' +
+        '  - 树莓派 BCM GPIO 27 (物理 Pin 13) -> 限流电阻 330Ω -> PC817 光耦输入端 IN2 (预对焦/唤醒通道)\n' +
+        '  - 树莓派 GND (物理 Pin 6/9/14) -> PC817 光耦公共地 GND\n' +
+        '• 相机快门插头接线 (2.5mm / 3.5mm TRS 音频头定义)：\n' +
+        '  - Sleeve (套管/底座): 相机接地 GND -> 接 PC817 输出端地端\n' +
+        '  - Ring (中间环): 相机预唤醒/对焦 FOCUS -> 接 PC817 通道 2 集电极输出\n' +
+        '  - Tip (尖端): 相机快门 SHUTTER -> 接 PC817 通道 1 集电极输出\n' +
+        '• 简易替代方案：亦可使用 5V 双路继电器模块，常开端 (NO) 接快门线 Tip，公共端 (COM) 接快门线 Sleeve。',
     },
   ],
 };

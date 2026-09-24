@@ -101,3 +101,46 @@ export interface ObservationLogEntry {
   transparency: number; // 1-5
   notes: string;
 }
+
+export type CameraTriggerType = 'gpio_optocoupler' | 'pi_hq_camera' | 'gphoto2_usb' | 'simulator';
+
+export interface TimelapseConfig {
+  intervalSec: number;        // 拍摄间隔 (秒)
+  totalFrames: number;        // 拍摄总张数 (0 为无限制)
+  exposureSec: number;        // 单张曝光时长 (秒)
+  settlingDelaySec: number;   // 曝光前防抖等待 (秒)
+  triggerType: CameraTriggerType;
+  gpioShutterPin: number;     // BCM GPIO 编号 (默认 17)
+  gpioFocusPin: number;       // BCM GPIO 编号 (默认 27)
+  activeLevel: 'high' | 'low'; // 触发电平
+  targetFps: number;          // 目标成片帧率 (24, 30, 60 fps)
+  saveRaw: boolean;
+  prefix: string;
+}
+
+export type TimelapseStatus = 'idle' | 'running' | 'paused' | 'exposing' | 'settling' | 'waiting' | 'completed' | 'aborted';
+
+export interface CapturedFrame {
+  id: string;
+  frameIndex: number;
+  timestamp: string;
+  exposureSec: number;
+  starCount?: number;
+  fwhm?: number;
+  thumbnailUrl?: string;
+  filename: string;
+}
+
+export interface TimelapseSessionState {
+  status: TimelapseStatus;
+  currentFrame: number;
+  totalFrames: number;
+  elapsedSec: number;
+  remainingSec: number;
+  currentExposureCountdown: number;
+  nextShutterCountdown: number;
+  startTime: number | null;
+  config: TimelapseConfig;
+  capturedFrames: CapturedFrame[];
+}
+

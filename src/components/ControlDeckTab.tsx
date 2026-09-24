@@ -14,6 +14,7 @@ import {
   horizontalToEquatorial,
 } from '../services/astronomy';
 import { telescopeBridge } from '../services/celestronProtocol';
+import { TrackingPrecisionChart } from './TrackingPrecisionChart';
 import {
   ArrowUp,
   ArrowDown,
@@ -909,6 +910,15 @@ export const ControlDeckTab: React.FC<ControlDeckTabProps> = ({
             </form>
           </div>
         </div>
+      </div>
+
+      {/* Real-time Tracking Precision Error Chart (Recharts) */}
+      <div className="pt-2">
+        <TrackingPrecisionChart
+          state={state}
+          nightMode={nightMode}
+          title="望远镜赤经/赤纬实时追踪精度偏差图 (Recharts 实时解算)"
+        />
       </div>
     </div>
   );
